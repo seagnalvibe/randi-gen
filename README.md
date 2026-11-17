@@ -18,7 +18,7 @@ pip install -e '.[test]'  # + pytest
 
 ```bash
 # 1) carte 3D NetCDF à 3 fréquences + figures PNG + viewer HTML
-randi-gen run --bbox 41.8 5.5 43.4 9.6 --res 0.05 --freq 100 1000 10000 --az-step 10 \
+randi-gen run --bbox 41.8 5.5 43.4 9.6 --res 0.05 --freq 100 1000 10000 --n-azimuth 36 \
     --ais synthetic --out output --figures --html
 # ou simplement :
 python examples/run_toulon_corsica.py
@@ -66,8 +66,19 @@ randi-gen run --bbox 41.8 5.5 43.4 9.6 --ais-density emodnet --emodnet-layer ves
 # ou raster téléchargé depuis le portail EMODnet (GeoTIFF zippé) ou local :
 randi-gen run --ais-density VesselDensity_All_2023.tif ...
 randi-gen run --ais-density https://.../vessel_density.zip ...
-# ou par type de navire (couches EMODnet dédiées) :
-randi-gen run --ais-density-type cargo=emodnet --ais-density-type passenger=emodnet ...
+# ou par type de navire : chaque type a SA propre couche EMODnet dédiée
+# (vesseldensity_XXavg, codes 00-12 : other=00, fishing=01, service=02, dredging=03,
+#  sailing=04, pleasure=05, highspeed=06, tug=07, passenger=08, cargo=09, tanker=10,
+#  military=11, unknown=12) et contribue à la sommation de bruit avec son propre
+# niveau de source SL(f, type, v) (tanker 185, cargo 182, passager 178, pêche 168,
+# autre 165 dB re 1 µPa @ 1 m à 100 Hz) :
+randi-gen run --ais-density-type cargo=emodnet --ais-density-type tanker=emodnet \
+    --ais-density-type passenger=emodnet --ais-density-type fishing=emodnet \
+    --ais-density-type other=emodnet ...
+# SPEC peut aussi être un fichier/URL local par type. En mode par type, le raster
+# combiné (somme des couches par type) est sauvegardé comme density_used.tif/.asc
+# et affiché (density_used.png), comme en mode --ais-density.
+# Cas test : python examples/run_toulon_corsica_emodnet_types.py
 ```
 
 Formats acceptés : `.tif/.tiff` (rasterio), `.asc/.grd` (ESRI ASCII, sans dépendance),
@@ -95,16 +106,21 @@ des `.nc`). La chaîne de conversion densité → navires → niveau directif es
 | `directionality_index` | `lat, lon` | DI = 10·log10(max/min sur azimut) (dB) |
 
 Attributs globaux : `frequency_hz`, `ais_source`, `n_ships`, `bbox_south_west_north_east`,
-`grid_resolution_deg`, `azimuth_step_deg`, `max_range_km`, `spreading_exponent`, `min_range_m`,
-`history`, `references`.
+`grid_resolution_deg`, `azimuth_step_deg`, `azimuth_aperture_deg`, `max_range_km`, `spreading_exponent`,
+`min_range_m`, `history`, `references`.
 
 ## Modèle (résumé, voir docs/MODEL.md)
 
 Pour chaque cellule réceptrice et chaque secteur d'azimut `az`, somme incohérente des navires
-AIS situés dans ce secteur, atténués par la perte de transmission :
+AIS pondérés par une **ouverture en azimut** — gaussienne de FWHM `azimuth_aperture_deg`
+(= 360/`--n-azimuth` par défaut, ex. 10°) ou **directivité tabulée** dans un fichier .mat
+(`--az-pattern`, la forme de l'ouverture peut alors varier suivant l'angle ; poids normalisés
+par navire, donc omnidirectionnel inchangé et cartes lissées au lieu d'un tout-ou-rien par
+secteur) — atténués par la perte de transmission :
 
 ```
-NL(lat, lon, az, f) = 10·log10( Σ_navires(az) 10^((SL(f,type,v) − TL(r,f))/10) + P_fond(f) )
+NL(lat, lon, az, f) = 10·log10( Σ_navires w(az, cap)·10^((SL(f,type,v) − TL(r,f))/10) + P_fond(f) )
+w(az, cap) = exp(−4·ln2·((az − cap)/ouverture)²)      (ouverture = FWHM en degrés)
 TL(r, f) = 10·n·log10(r) + α_Thorp(f)·r/1000        (r en m, plafonnée à min_range_m)
 SL(f)    = SL_100Hz(type) − 17·log10(f/100) + clip(5·log10(v/12), ±6)
 ```

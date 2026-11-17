@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import DEFAULT_AZIMUTH_STEP_DEG, DEFAULT_BBOX, DEFAULT_FREQS, DEFAULT_RES_DEG
+from .config import DEFAULT_BBOX, DEFAULT_FREQS, DEFAULT_N_AZIMUTH, DEFAULT_RES_DEG
 
 
 def build_parser():
@@ -23,7 +23,18 @@ def build_parser():
                    default=list(DEFAULT_BBOX), help="boîte lat/lon en degrés (défaut: zone Toulon-Corse)")
     r.add_argument("--res", type=float, default=DEFAULT_RES_DEG, help="résolution de la grille (°)")
     r.add_argument("--freq", nargs="+", type=float, default=list(DEFAULT_FREQS), help="fréquence(s) en Hz")
-    r.add_argument("--az-step", type=float, default=DEFAULT_AZIMUTH_STEP_DEG, help="pas angulaire d'azimut (°, doit diviser 360)")
+    r.add_argument("--n-azimuth", type=int, default=None,
+                   help=f"nombre de secteurs d'azimut sur 360° (défaut: {DEFAULT_N_AZIMUTH}) ; ignoré si --az-pattern est donné")
+    r.add_argument("--az-aperture", type=float, default=None,
+                   help="ouverture (FWHM, °) de la fenêtre gaussienne d'azimut centrée sur le cap de chaque navire "
+                        "(défaut: 360/--n-azimuth) ; répartit l'énergie d'un navire sur les secteurs voisins au lieu d'un "
+                        "tout-ou-rien, ce qui lisse les cartes (niveau omnidirectionnel inchangé)")
+    r.add_argument("--az-pattern", default=None, metavar="FILE.mat",
+                   help="fichier .mat tabulant pour chaque azimut la directivité à appliquer en fonction du cap sous "
+                        "lequel le récepteur voit la source (variables azimuth, angle, directivity ; voir pattern.py) : "
+                        "le nombre d'azimuts et l'échantillonnage angulaire sont extraits du fichier et la directivité "
+                        "est interpolée (linéairement, périodique sur 360°), ce qui permet de faire varier la forme de "
+                        "l'ouverture suivant l'angle")
     r.add_argument("--ais", default="synthetic", help="'synthetic' ou chemin d'un fichier CSV/GeoJSON de points AIS")
     r.add_argument("--ais-file", default=None, help="fichier CSV/GeoJSON de points AIS (colonnes lon,lat[,type,speed])")
     r.add_argument("--ais-url", default=None, help="URL http(s) de statistiques/points AIS (CSV ou GeoJSON), ex. export EMODnet ou MarineTraffic")
@@ -32,7 +43,7 @@ def build_parser():
     r.add_argument("--emodnet-layer", default="vesseldensity_allavg",
                    help="couche EMODnet vessel density (défaut: vesseldensity_allavg ; par type: vesseldensity_09avg cargo, _10 tanker, _08 passenger, _01 fishing)")
     r.add_argument("--ais-density-type", action="append", default=[], metavar="TYPE=SPEC",
-                   help="raster de densité par type de navire, répétable (TYPE in cargo,tanker,passenger,fishing,other ; SPEC='emodnet' ou chemin/URL)")
+                   help="raster de densité par type de navire, répétable (TYPE = nom de type EMODnet : cargo,tanker,passenger,fishing,other,service,dredging,sailing,pleasure,highspeed,tug,military,unknown ; SPEC='emodnet' -> couche vesseldensity_XXavg dédiée, ou chemin/URL). Chaque type contribue à la sommation avec son propre niveau de source SL(f,type,v)")
     r.add_argument("--density-hours-per-month", type=float, default=720.0,
                    help="heures par mois pour convertir la densité EMODnet (h/km²/mois) en navires (défaut 720)")
     r.add_argument("--density-scale", type=float, default=1.0, help="facteur d'échelle sur la densité échantillonnée")
@@ -85,7 +96,9 @@ def _ships_from_density(args, bbox, outdir):
                           write_ascii_grid)
 
     if args.ais_density_type:
-        cats = []
+        from .density import combine_rasters
+
+        cats, rasters = [], []
         for item in args.ais_density_type:
             t, _, sp = item.partition("=")
             t = t.strip().lower()
@@ -94,16 +107,33 @@ def _ships_from_density(args, bbox, outdir):
             if sp.strip().lower() == "emodnet":
                 raster, note = load_density_raster("emodnet", bbox=bbox, outdir=outdir, seed=args.seed,
                                                    layer=EMODNET_TYPE_LAYER[t])
+                print(f"[randi-gen] densité type={t} [{note}] : couche EMODnet {EMODNET_TYPE_LAYER[t]}, "
+                      f"raster {raster.shape}, max={np.nanmax(raster.values):.1f} h/km²/mois")
             else:
                 raster, note = load_density_raster(sp, bbox=bbox, outdir=outdir, seed=args.seed)
-            print(f"[randi-gen] densité type={t} [{note}] : raster {raster.shape}, max={np.nanmax(raster.values):.1f} h/km²/mois")
+                print(f"[randi-gen] densité type={t} [{note}] : {sp}, raster {raster.shape}, "
+                      f"max={np.nanmax(raster.values):.1f} h/km²/mois")
+            rasters.append(raster)
             cats.append(sample_catalog_from_density(raster, bbox=bbox, seed=args.seed,
                                                     hours_per_month=args.density_hours_per_month,
                                                     scale=args.density_scale, max_ships=args.max_ships,
                                                     fixed_type=t))
         ships = ShipCatalog.concat(cats)
-        ships.source = "emodnet-vessel-density-per-type; " + ships.source
-        return ships, None
+        ships.source = "vessel-density-per-type; " + ships.source
+        combined = combine_rasters(rasters)
+        if combined is not None:
+            try:
+                from .density import write_geotiff
+
+                rp = write_geotiff(combined, Path(outdir) / "density_used.tif")
+            except ImportError:
+                rp = write_ascii_grid(combined, Path(outdir) / "density_used.asc")
+            from .visualize import plot_density_raster
+
+            plot_density_raster(combined, Path(outdir) / "density_used.png")
+            print(f"[randi-gen] raster combiné (somme des types) {combined.shape}, "
+                  f"max={np.nanmax(combined.values):.1f} h/km²/mois -> {rp} et density_used.png")
+        return ships, combined
     raster, note = load_density_raster(args.ais_density, bbox=bbox, outdir=outdir, seed=args.seed,
                                        layer=args.emodnet_layer)
     try:
@@ -143,8 +173,19 @@ def cmd_run(args):
     print(f"[randi-gen] AIS : {len(ships)} navires (source : {ships.source})")
     lats, lons = make_grid(bbox, args.res)
     print(f"[randi-gen] grille : {lats.size} x {lons.size} cellules (res={args.res}°), bbox={bbox}")
-    params = ModelParams(azimuth_step_deg=args.az_step, max_range_km=args.max_range_km,
-                         min_range_m=args.min_range_m, spreading=args.spreading)
+    n_azimuth = args.n_azimuth if args.n_azimuth is not None else DEFAULT_N_AZIMUTH
+    az_pattern = None
+    if args.az_pattern:
+        from .pattern import load_pattern
+
+        az_pattern = load_pattern(args.az_pattern, n_azimuth_hint=n_azimuth)
+        print(f"[randi-gen] directivité tabulée : {az_pattern.n_azimuth} azimuts, "
+              f"{az_pattern.angle.size} échantillons d'angle depuis {args.az_pattern}")
+        if args.n_azimuth is not None and az_pattern.azimuth.size != n_azimuth:
+            print(f"[randi-gen] note : --n-azimuth {n_azimuth} ignoré, la grille vient du fichier "
+                  f"({az_pattern.azimuth.size} azimuts)")
+    params = ModelParams(n_azimuth=n_azimuth, azimuth_aperture_deg=args.az_aperture, azimuth_pattern=az_pattern,
+                         max_range_km=args.max_range_km, min_range_m=args.min_range_m, spreading=args.spreading)
     fields, paths = [], []
     for freq in args.freq:
         field = compute_directional_noise(lats, lons, ships, freq, params)

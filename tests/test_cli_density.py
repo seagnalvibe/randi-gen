@@ -18,7 +18,7 @@ def density_file(tmp_path_factory):
 
 
 def test_run_with_local_density_raster(tmp_path, density_file):
-    rc = main(["run", "--bbox", *BBOX, "--res", "0.2", "--freq", "1000", "--az-step", "10",
+    rc = main(["run", "--bbox", *BBOX, "--res", "0.2", "--freq", "1000", "--n-azimuth", "36",
                "--ais-density", str(density_file), "--max-ships", "3000",
                "--out", str(tmp_path)])
     assert rc == 0
@@ -77,3 +77,15 @@ def test_run_density_per_type(tmp_path, density_file):
     assert rc == 0
     with xr.open_dataset(tmp_path / "randi_map_f1000Hz.nc", engine="netcdf4") as ds:
         assert int(ds.attrs["n_ships"]) > 50
+        assert "per-type" in ds.attrs["ais_source"]
+    # raster combiné (somme des types) sauvegardé et affiché comme en mode --ais-density
+    assert (tmp_path / "density_used.tif").exists() or (tmp_path / "density_used.asc").exists()
+    assert (tmp_path / "density_used.png").exists()
+
+
+def test_run_density_per_type_normalizes_kinds(tmp_path, density_file):
+    from randi_gen.density import load_density_raster, sample_catalog_from_density
+
+    raster, _ = load_density_raster(str(density_file), bbox=tuple(float(v) for v in BBOX), log=lambda *a: None)
+    cat = sample_catalog_from_density(raster, bbox=tuple(float(v) for v in BBOX), fixed_type="sailing")
+    assert set(np.unique(cat.kind)) == {"other"}  # normalisé vers les 5 classes du modèle

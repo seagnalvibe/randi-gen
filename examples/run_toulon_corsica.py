@@ -23,7 +23,7 @@ if __name__ == "__main__":
                 "--bbox", "41.8", "5.5", "43.4", "9.6",  # entre Toulon et la Corse
                 "--res", "0.05",
                 "--freq", "100", "1000", "10000",
-                "--az-step", "10",
+                "--n-azimuth", "36",
                 "--ais", "synthetic",
                 "--seed", "42",
                 "--out", str(OUT),
