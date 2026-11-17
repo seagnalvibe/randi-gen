@@ -54,6 +54,14 @@ indice de directivité DI    = 10·log10( max_az NL / min_az NL )     [dB]
 - `--ais-file` / `--ais-url` : points AIS réels en CSV (`lon,lat[,type,speed]`) ou GeoJSON,
   typiquement issus de statistiques publiques en ligne (EMODnet Human Activities, MarineTraffic,
   marinecadastre...). Le catalogue est filtré sur la bbox (marge 0,5°).
+- `--ais-density SPEC` (**vessel density**, ex. EMODnet) : raster de densité AIS en
+  h/km²/mois. `SPEC` = `emodnet` (téléchargement WCS `vesseldensity_allavg` sur la bbox ;
+  **repli automatique sur un raster de test synthétique** sauvegardé dans le répertoire de
+  sortie si le service est indisponible), une URL (`.tif/.asc/.nc/.zip`), ou un fichier
+  local. Échantillonnage : `navires moyens/cellule = densité × aire_cellule(km²) / 720`
+  (720 h/mois), puis tirage de Poisson par cellule, positions uniformes dans la cellule,
+  type selon `--ais-density-type TYPE=SPEC` (couches EMODnet par type) ou mix par défaut.
+  Le raster effectivement utilisé est sauvé (`density_used.asc`).
 
 ## Hypothèses et limites
 

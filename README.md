@@ -51,6 +51,31 @@ Format CSV attendu : colonnes `lon,lat` (alias `longitude/lng`, `latitude`) + op
 `type`/`ship_type` (`tanker`, `cargo`, `passenger`/`ferry`, `fishing`, autre) et
 `speed`/`sog` (nœuds). GeoJSON de `Point` accepté (propriétés `type`, `speed`/`sog`).
 
+### Mode « vessel density » (raster de densité AIS, ex. EMODnet)
+
+Alternative aux points AIS : un **raster de densité de navires** (heures/km²/mois, mailles ~1 km),
+par ex. la couche **EMODnet Human Activities « Vessel Density Map »** (WMS/WCS :
+`ows.emodnet-humanactivities.eu`, couches `vesseldensity_allavg`, `vesseldensity_09avg` cargo,
+`_10` tanker, `_08` passenger, `_01` fishing, ...). Les navires sont échantillonnés
+proportionnellement à la densité : `navires/cellule = densité × aire(km²) / heures_par_mois`.
+
+```bash
+# téléchargement direct via le WCS EMODnet sur la bbox ; si indisponible,
+# un raster de TEST synthétique (format EMODnet, zone Toulon-Corse) est généré et sauvegardé
+randi-gen run --bbox 41.8 5.5 43.4 9.6 --ais-density emodnet --emodnet-layer vesseldensity_allavg --out output_emodnet --figures --html
+# ou raster téléchargé depuis le portail EMODnet (GeoTIFF zippé) ou local :
+randi-gen run --ais-density VesselDensity_All_2023.tif ...
+randi-gen run --ais-density https://.../vessel_density.zip ...
+# ou par type de navire (couches EMODnet dédiées) :
+randi-gen run --ais-density-type cargo=emodnet --ais-density-type passenger=emodnet ...
+```
+
+Formats acceptés : `.tif/.tiff` (rasterio), `.asc/.grd` (ESRI ASCII, sans dépendance),
+`.nc` (NetCDF 2D), `.zip` (premier raster trouvé). Options : `--density-hours-per-month` (720),
+`--density-scale`, `--max-ships` (20000). Le raster utilisé est sauvé (`density_used.asc`,
+`emodnet_vesseldensity_TEST.asc` en repli) dans le répertoire de sortie. Cas test :
+`python examples/run_toulon_corsica_emodnet.py`.
+
 ## Structure du NetCDF (CF-1.8)
 
 | Élément | Dimensions | Description |

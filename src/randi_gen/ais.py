@@ -49,6 +49,19 @@ class ShipCatalog:
         )
         return ShipCatalog(self.lat[m], self.lon[m], self.kind[m], self.speed_kn[m], self.source)
 
+    @classmethod
+    def concat(cls, catalogs):
+        cats = [c for c in catalogs if len(c) > 0]
+        if not cats:
+            raise ValueError("concat de catalogues vides")
+        return cls(
+            lat=np.concatenate([c.lat for c in cats]),
+            lon=np.concatenate([c.lon for c in cats]),
+            kind=np.concatenate([c.kind for c in cats]).astype("<U16"),
+            speed_kn=np.concatenate([c.speed_kn for c in cats]).astype(float),
+            source="+".join(sorted({c.source for c in cats})),
+        )
+
 
 # (nom, lat1, lon1, lat2, lon2, navires/jour, type, vitesse nœuds)
 LANES = [
