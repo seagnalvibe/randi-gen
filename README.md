@@ -72,9 +72,17 @@ randi-gen run --ais-density-type cargo=emodnet --ais-density-type passenger=emod
 
 Formats acceptés : `.tif/.tiff` (rasterio), `.asc/.grd` (ESRI ASCII, sans dépendance),
 `.nc` (NetCDF 2D), `.zip` (premier raster trouvé). Options : `--density-hours-per-month` (720),
-`--density-scale`, `--max-ships` (20000). Le raster utilisé est sauvé (`density_used.asc`,
+`--density-scale`, `--max-ships` (20000). Le raster utilisé est sauvé (`density_used.tif`,
 `emodnet_vesseldensity_TEST.asc` en repli) dans le répertoire de sortie. Cas test :
 `python examples/run_toulon_corsica_emodnet.py`.
+
+**Affichage des données brutes vessel density** : `density_used.png` est produit à chaque
+run en mode densité ; on peut aussi rendre n'importe quel raster avec
+`randi-gen density-plot raster.tif -o densite.png`, l'ajouter au viewer HTML
+(`randi-gen html map.nc --density density_used.tif ...`, carte en haut) et la retrouver
+dans l'interface Streamlit (`randi-gen serve ...` détecte `density_used.tif/.asc` à côté
+des `.nc`). La chaîne de conversion densité → navires → niveau directif est détaillée dans
+[docs/MODEL.md](docs/MODEL.md#chaîne-complète--du-vessel-density-brut-au-niveau-de-bruit-directif-nllat-lon-az-f).
 
 ## Structure du NetCDF (CF-1.8)
 

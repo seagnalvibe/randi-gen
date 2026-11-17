@@ -59,11 +59,19 @@ def build_parser():
 
     h = sub.add_parser("html", help="génère un viewer HTML interactif (curseur d'azimut, fréquence)")
     h.add_argument("files", nargs="+", help="fichier(s) .nc")
+    h.add_argument("--density", default=None, help="raster de vessel density (.tif/.asc/.nc) à afficher en données brutes")
     h.add_argument("-o", "--out", default="viewer.html", help="fichier HTML de sortie")
     h.set_defaults(func=cmd_html)
 
+    d = sub.add_parser("density-plot", help="affiche un raster de vessel density brut en PNG")
+    d.add_argument("file", help="raster .tif/.tiff/.asc/.grd/.nc/.zip ou 'emodnet'")
+    d.add_argument("--bbox", nargs=4, type=float, metavar=("S", "W", "N", "E"), default=None)
+    d.add_argument("--linear", action="store_true", help="échelle linéaire au lieu de log")
+    d.add_argument("-o", "--out", default=None, help="fichier PNG de sortie")
+    d.set_defaults(func=cmd_density_plot)
+
     s = sub.add_parser("serve", help="lance l'interface Streamlit en local (127.0.0.1 uniquement)")
-    s.add_argument("files", nargs="+", help="fichier(s) .nc")
+    s.add_argument("files", nargs="+", help="fichier(s) .nc (et/ou raster de densité .tif/.asc à afficher en brut)")
     s.add_argument("--port", type=int, default=8501)
     s.set_defaults(func=cmd_serve)
     return p
@@ -95,7 +103,7 @@ def _ships_from_density(args, bbox, outdir):
                                                     fixed_type=t))
         ships = ShipCatalog.concat(cats)
         ships.source = "emodnet-vessel-density-per-type; " + ships.source
-        return ships
+        return ships, None
     raster, note = load_density_raster(args.ais_density, bbox=bbox, outdir=outdir, seed=args.seed,
                                        layer=args.emodnet_layer)
     try:
@@ -106,10 +114,14 @@ def _ships_from_density(args, bbox, outdir):
         rp = write_ascii_grid(raster, Path(outdir) / "density_used.asc")
     print(f"[randi-gen] raster densité [{note}] {raster.shape}, crs={raster.crs}, "
           f"max={np.nanmax(raster.values):.1f}, moy={np.nanmean(raster.values):.2f} h/km²/mois -> {rp}")
+    from .visualize import plot_density_raster
+
+    plot_density_raster(raster, Path(outdir) / "density_used.png")
+    print(f"[randi-gen] carte du raster brut -> {Path(outdir) / 'density_used.png'}")
     ships = sample_catalog_from_density(raster, bbox=bbox, seed=args.seed,
                                         hours_per_month=args.density_hours_per_month,
                                         scale=args.density_scale, max_ships=args.max_ships)
-    return ships
+    return ships, raster
 
 
 def cmd_run(args):
@@ -122,8 +134,9 @@ def cmd_run(args):
     bbox = tuple(float(v) for v in args.bbox)
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
+    density_raster = None
     if args.ais_density or args.ais_density_type:
-        ships = _ships_from_density(args, bbox, outdir)
+        ships, density_raster = _ships_from_density(args, bbox, outdir)
     else:
         ships = load_ais(source=args.ais, file=args.ais_file, url=args.ais_url,
                          bbox=bbox, seed=args.seed, ships_scale=args.ships_scale)
@@ -156,7 +169,7 @@ def cmd_run(args):
         from .visualize import build_html_viewer
 
         hp = outdir / "viewer.html"
-        build_html_viewer(fields, hp)
+        build_html_viewer(fields, hp, density_raster=density_raster)
         print(f"[randi-gen] viewer HTML -> {hp}")
     return 0
 
@@ -206,12 +219,35 @@ def cmd_plot(args):
     return 0
 
 
+def cmd_density_plot(args):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from .density import load_density_raster
+    from .visualize import plot_density_raster
+
+    bbox = tuple(args.bbox) if args.bbox else None
+    raster, note = load_density_raster(args.file, bbox=bbox, log=print)
+    out = args.out or str(Path(args.file).with_suffix(".png"))
+    fig, _ = plot_density_raster(raster, out, log_scale=not args.linear)
+    plt.close(fig)
+    print(f"[randi-gen] raster [{note}] {raster.shape} -> {out}")
+    return 0
+
+
 def cmd_html(args):
     from .netcdf_io import read_field
     from .visualize import build_html_viewer
 
     fields = [read_field(p) for p in args.files]
-    out = build_html_viewer(fields, args.out)
+    density_raster = None
+    if args.density:
+        from .density import load_density_raster
+
+        density_raster, _note = load_density_raster(args.density, log=print)
+    out = build_html_viewer(fields, args.out, density_raster=density_raster)
     print(f"[randi-gen] viewer HTML -> {out}")
     return 0
 
@@ -222,17 +258,25 @@ def cmd_serve(args):
     except ImportError:
         print("streamlit n'est pas installé : pip install 'randi-gen[ui]'", file=sys.stderr)
         return 2
+    extra = []
     for f in args.files:
         if not Path(f).exists():
             print(f"fichier introuvable : {f}", file=sys.stderr)
             return 2
+        if not f.lower().endswith(".nc"):
+            extra.append(f)  # raster de densité à afficher en brut
+        else:
+            for cand in ("density_used.tif", "density_used.asc", "emodnet_vesseldensity_TEST.asc"):
+                p = Path(f).parent / cand
+                if p.exists() and str(p) not in extra:
+                    extra.append(str(p))
     app = Path(__file__).with_name("app.py")
     cmd = [
         sys.executable, "-m", "streamlit", "run", str(app),
         "--server.address", "127.0.0.1",
         "--server.port", str(args.port),
         "--server.headless", "true",
-        "--", *args.files,
+        "--", *args.files, *extra,
     ]
     print(f"[randi-gen] interface locale : http://127.0.0.1:{args.port}  (Ctrl+C pour arrêter)")
     return subprocess.call(cmd)

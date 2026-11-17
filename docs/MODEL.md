@@ -61,7 +61,31 @@ indice de directivité DI    = 10·log10( max_az NL / min_az NL )     [dB]
   local. Échantillonnage : `navires moyens/cellule = densité × aire_cellule(km²) / 720`
   (720 h/mois), puis tirage de Poisson par cellule, positions uniformes dans la cellule,
   type selon `--ais-density-type TYPE=SPEC` (couches EMODnet par type) ou mix par défaut.
-  Le raster effectivement utilisé est sauvé (`density_used.asc`).
+  Le raster effectivement utilisé est sauvé (`density_used.tif`) et **affiché tel quel**
+  (`density_used.png` à chaque run, `randi-gen density-plot raster.tif`, carte « données
+  brutes » en haut du viewer HTML via `html --density raster.tif`, et dans l'interface
+  Streamlit à côté des .nc).
+
+## Chaîne complète : du vessel density brut au niveau de bruit directif NL(lat, lon, az, f)
+
+1. **Raster brut EMODnet** (`vesseldensity_*`) : `D(x)` en **heures/km²/mois**, mailles ~1 km
+   (EPSG:3857 natif, reprojeté en EPSG:4326 en mémoire). C'est la donnée affichée « brute ».
+2. **Densité → navires** : la densité en heures par mois divisée par le nombre d'heures du
+   mois donne le **nombre moyen de navires présents** par km² : `λ_cellule = D(x) · A_km² / H`
+   avec `H = 720 h/mois` (option `--density-hours-per-month`) et `A` = aire de la cellule.
+   Tirage de **Poisson(λ)** par cellule → `N` navires, positions **uniformes dans la
+   cellule**, type de navire (couche EMODnet par type, sinon mix cargo 35 % / tanker 15 % /
+   passagers 20 % / pêche 20 % / autre 10 %), vitesse `~ N(μ_type, 1,5)` bornée [2, 25] nœuds.
+   On obtient un **ShipCatalog (lat, lon, type, vitesse)** — strictement identique à celui
+   du mode « points AIS », donc la suite du modèle est la même.
+3. **Navire → source ponctuelle** : `SL(f, type, v)` (formule ci-dessus), en dB re 1 µPa @ 1 m.
+4. **Sources → champ directif** : pour chaque cellule réceptrice (lat, lon) et chaque secteur
+   d'azimut `az` (pas de 10°), somme incohérente des navires du secteur (cap vu depuis le
+   récepteur), atténués par la perte de transmission :
+   `NL(lat, lon, az, f) = 10·log10( Σ 10^((SL − TL(r,f))/10) + 10^(P_fond/10) )`,
+   `r` = distance haversine navire→récepteur, `TL(r,f) = 15·log10(r_m) + α_Thorp(f)·r_km`.
+5. **Sortie** : NetCDF 3D `noise_level(lat, lon, azimuth)` + `omnidirectional_level` +
+   `directionality_index` (2D).
 
 ## Hypothèses et limites
 
