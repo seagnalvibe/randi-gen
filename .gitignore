@@ -10,3 +10,4 @@ examples/output/
 *.nc
 *.png
 *.html
+randi-env/
