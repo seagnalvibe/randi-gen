@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import plotly.graph_objects as go
 import streamlit as st
 
 from randi_gen.netcdf_io import read_field
@@ -18,21 +19,49 @@ from randi_gen.netcdf_io import read_field
 st.set_page_config(page_title="randi-gen — bruit ambiant directif", layout="wide")
 
 
-def script_files():
+def script_args():
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
-    return [a for a in args if a.lower().endswith(".nc")]
+    return [a for a in args if not a.startswith("-")]
+
+
+def script_files():
+    return [a for a in script_args() if a.lower().endswith(".nc")]
+
+
+def script_density_files():
+    return [a for a in script_args() if not a.lower().endswith(".nc") and Path(a).exists()]
 
 
 st.title("randi-gen — carte 3D de bruit ambiant sous-marin directif (RANDI)")
 st.caption("Carte 3D NetCDF (lat, lon, azimut) — niveaux spectraux en dB re 1 µPa²/Hz, azimut 0 = Nord, sens horaire vu depuis le récepteur")
 
 files = script_files()
+density_paths = script_density_files()
 uploaded = st.sidebar.file_uploader("Ou importer un fichier NetCDF (.nc)", type=["nc"], accept_multiple_files=True)
 paths = list(files)
 for u in uploaded or []:
     p = Path(tempfile.mkdtemp()) / u.name
     p.write_bytes(u.getbuffer())
     paths.append(str(p))
+
+if density_paths:
+    from randi_gen.density import _load_any
+
+    with st.expander("Vessel density — données brutes (raster utilisé)", expanded=True):
+        for dp in density_paths:
+            try:
+                raster = _load_any(dp)
+            except Exception as e:
+                st.warning(f"{dp} : lecture impossible ({e})")
+                continue
+            v = np.asarray(raster.values, float)
+            v = np.where(np.isfinite(v) & (v > 0), np.log10(v), np.nan)
+            dfig = go.Figure(go.Heatmap(x=raster.lons, y=raster.lats, z=v, colorscale="YlOrRd",
+                                         colorbar=dict(title="log10 h/km²/mois")))
+            dfig.update_layout(title=f"{Path(dp).name} — densité brute (h/km²/mois, log10), crs={raster.crs}",
+                               xaxis_title="Longitude (°E)", yaxis_title="Latitude (°N)", height=520)
+            st.plotly_chart(dfig, use_container_width=True)
+            st.caption(f"source : {raster.source[:200]} | max = {float(np.nanmax(raster.values)):.1f} h/km²/mois")
 
 if not paths:
     st.info("Aucun fichier .nc fourni. Lancez par exemple : `randi-gen serve output/randi_map_f1000Hz.nc` ou importez un fichier .nc.")
@@ -46,8 +75,6 @@ f = fields[fi]
 az = st.sidebar.slider("Azimut (°)", 0.0, 355.0, 0.0, 5.0)
 ai = int(np.argmin(np.abs(((f.azimuth - az + 180.0) % 360.0) - 180.0)))
 cmap = st.sidebar.selectbox("Colormap", ["Viridis", "Plasma", "Inferno", "Cividis", "Turbo"])
-
-import plotly.graph_objects as go
 
 z = f.noise_level[:, :, ai]
 fig = go.Figure(go.Heatmap(x=f.lon, y=f.lat, z=z, colorscale=cmap, colorbar=dict(title="dB re 1 µPa²/Hz")))

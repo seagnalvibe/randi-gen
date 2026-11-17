@@ -25,12 +25,31 @@ def test_run_with_local_density_raster(tmp_path, density_file):
     f = tmp_path / "randi_map_f1000Hz.nc"
     assert f.exists()
     assert (tmp_path / "density_used.tif").exists() or (tmp_path / "density_used.asc").exists()
+    assert (tmp_path / "density_used.png").exists()  # affichage des données brutes
     with xr.open_dataset(f, engine="netcdf4") as ds:
         assert ds["noise_level"].dims == ("lat", "lon", "azimuth")
         assert np.isfinite(ds["noise_level"].values).all()
         assert "vessel-density" in ds.attrs["ais_source"]
         assert int(ds.attrs["n_ships"]) > 100
         assert float(ds["directionality_index"].max()) >= 2.0
+
+
+def test_density_plot_command(tmp_path, density_file):
+    png = tmp_path / "dens.png"
+    assert main(["density-plot", str(density_file), "-o", str(png)]) == 0
+    assert png.exists() and png.stat().st_size > 10_000
+
+
+def test_html_with_density_map(tmp_path, density_file):
+    rc = main(["run", "--bbox", *BBOX, "--res", "0.25", "--freq", "1000",
+               "--ais-density", str(density_file), "--max-ships", "1500",
+               "--out", str(tmp_path / "run")])
+    assert rc == 0
+    nc = tmp_path / "run" / "randi_map_f1000Hz.nc"
+    html = tmp_path / "viewer.html"
+    assert main(["html", str(nc), "--density", str(density_file), "-o", str(html)]) == 0
+    content = html.read_bytes()
+    assert b"Vessel density" in content  # carte des données brutes présente
 
 
 def test_run_emodnet_fallback_offline(tmp_path, monkeypatch):

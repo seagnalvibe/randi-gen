@@ -109,3 +109,15 @@ def test_fetch_emodnet_online():
     r = dens.fetch_emodnet_vessel_density((42.5, 6.5, 43.0, 7.5), layer="vesseldensity_allavg")
     assert r.shape[0] > 10 and r.shape[1] > 10
     assert np.nanmax(r.values) >= 0
+
+
+def test_plot_density_raster(tmp_path):
+    from randi_gen.visualize import plot_density_raster
+
+    r = synthetic_density_raster(bbox=BBOX, cellsize_deg=0.05, seed=1)
+    out = tmp_path / "density.png"
+    fig, _ = plot_density_raster(r, out)
+    assert out.exists() and out.stat().st_size > 10_000
+    import matplotlib.pyplot as plt
+
+    plt.close(fig)

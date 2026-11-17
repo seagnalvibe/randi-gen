@@ -104,6 +104,34 @@ def plot_surface3d(field, azimuth_deg):
     return fig
 
 
+def plot_density_raster(raster, out_path=None, ax=None, cmap="YlOrRd", log_scale=True):
+    """Affiche le raster brut de vessel density (h/km²/mois, échelle log par défaut)."""
+    from matplotlib.colors import LogNorm
+
+    fig, ax = (plt.subplots(figsize=(8.5, 6.5)) if ax is None else (ax.figure, ax))
+    v = np.asarray(raster.values, dtype=float)
+    if log_scale:
+        vm = np.ma.masked_where(~np.isfinite(v) | (v <= 0), v)
+        vmax = float(np.nanmax(v)) if np.isfinite(v).any() else 1.0
+        pcm = ax.pcolormesh(raster.lons, raster.lats, vm, shading="auto", cmap=cmap,
+                            norm=LogNorm(vmin=max(1e-3, float(np.nanmin(vm)) if vm.count() else 1e-3), vmax=vmax))
+        cbl = "densité (h/km²/mois, log)"
+    else:
+        pcm = ax.pcolormesh(raster.lons, raster.lats, np.nan_to_num(v), shading="auto", cmap=cmap)
+        cbl = "densité (h/km²/mois)"
+    fig.colorbar(pcm, ax=ax, label=cbl)
+    _city_overlay(ax)
+    ax.set_xlabel("Longitude (°E)")
+    ax.set_ylabel("Latitude (°N)")
+    src = (raster.source or "")[:110]
+    ax.set_title(f"Vessel density (données brutes) — {src}")
+    if out_path is not None:
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_path, dpi=130, bbox_inches="tight")
+    return fig, ax
+
+
 def save_demo_figures(field, outdir):
     """Génère un jeu de figures de démonstration dans outdir, retourne les chemins."""
     outdir = Path(outdir)
@@ -127,9 +155,10 @@ def save_demo_figures(field, outdir):
     return paths
 
 
-def build_html_viewer(fields, out_path, max_traces=240):
+def build_html_viewer(fields, out_path, max_traces=240, density_raster=None):
     """Viewer HTML autonome (plotly embarqué) : carte + polaire + nuage 3D,
-    avec curseur d'azimut et sélecteur de fréquence si plusieurs champs."""
+    avec curseur d'azimut et sélecteur de fréquence si plusieurs champs.
+    Si density_raster est fourni, sa carte brute est affichée en haut (toujours visible)."""
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
@@ -151,17 +180,18 @@ def build_html_viewer(fields, out_path, max_traces=240):
     hy, hx = np.unravel_index(int(np.argmax(base.omnidirectional)), base.omnidirectional.shape)
     sub = max(1, int(np.ceil(max(lat2d.shape) / 40.0)))
 
-    fig = make_subplots(
-        rows=3,
-        cols=1,
-        row_heights=[0.45, 0.25, 0.30],
-        specs=[[{"type": "xy"}], [{"type": "polar"}], [{"type": "scene"}]],
-        subplot_titles=(
-            "Carte du niveau directif (lat, lon)",
-            f"Diagramme polaire au point chaud (lat={base.lat[hy]:.3f}°, lon={base.lon[hx]:.3f}°)",
-            "Nuage 3D sous-échantillonné (couleur = niveau)",
-        ),
-    )
+    has_density = density_raster is not None
+    specs = ([ [{"type": "xy"}] ] if has_density else []) + [
+        [{"type": "xy"}], [{"type": "polar"}], [{"type": "scene"}]
+    ]
+    heights = ([0.28] if has_density else []) + [0.32, 0.20, 0.20]
+    titles = (["Vessel density (données brutes, h/km²/mois, log)"] if has_density else []) + [
+        "Carte du niveau directif (lat, lon)",
+        f"Diagramme polaire au point chaud (lat={base.lat[hy]:.3f}°, lon={base.lon[hx]:.3f}°)",
+        "Nuage 3D sous-échantillonné (couleur = niveau)",
+    ]
+    row_map = 2 if has_density else 1
+    fig = make_subplots(rows=len(specs), cols=1, row_heights=heights, specs=specs, subplot_titles=titles)
     first = True
     for fi, f in enumerate(fields):
         for ai in az_idx:
@@ -172,12 +202,12 @@ def build_html_viewer(fields, out_path, max_traces=240):
                 go.Heatmap(x=f.lon, y=f.lat, z=z, colorscale="Viridis",
                            colorbar=dict(title="dB"), visible=vis,
                            name=f"f={f.frequency_hz:g} Hz, az={f.azimuth[ai]:g}°"),
-                row=1, col=1,
+                row=row_map, col=1,
             )
             fig.add_trace(
                 go.Barpolar(r=f.noise_level[hy, hx, :], theta=f.azimuth, visible=vis,
                             marker_color=z[hy, hx]),
-                row=2, col=1,
+                row=row_map + 1, col=1,
             )
             zz = z[::sub, ::sub]
             fig.add_trace(
@@ -187,8 +217,17 @@ def build_html_viewer(fields, out_path, max_traces=240):
                     marker=dict(size=2, color=zz.ravel(), colorscale="Viridis", showscale=False),
                     visible=vis,
                 ),
-                row=3, col=1,
+                row=row_map + 2, col=1,
             )
+    if has_density:
+        dv = np.asarray(density_raster.values, dtype=float)
+        dv = np.where(np.isfinite(dv) & (dv > 0), dv, np.nan)
+        fig.add_trace(
+            go.Heatmap(x=density_raster.lons, y=density_raster.lats, z=np.log10(dv),
+                       colorscale="YlOrRd", colorbar=dict(title="log10 h/km²/mois"),
+                       visible=True, name="vessel density (brut)", zmin=None, zmax=None),
+            row=1, col=1,
+        )
     fig.update_polars(angularaxis=dict(rotation=90, direction="clockwise"))
 
     ntraces = len(fig.data)
@@ -199,6 +238,8 @@ def build_html_viewer(fields, out_path, max_traces=240):
             vis = [False] * ntraces
             for j in range(3):
                 vis[(fi * n_az + k) * 3 + j] = True
+            if has_density:
+                vis[-1] = True  # la carte de densité brute reste visible
             label = f"az={base.azimuth[ai]:g}°" if nfreq == 1 else f"f={fields[fi].frequency_hz:g} Hz, az={base.azimuth[ai]:g}°"
             steps.append(dict(label=label, method="update", args=[{"visible": vis}]))
 
