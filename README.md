@@ -18,7 +18,7 @@ pip install -e '.[test]'  # + pytest
 
 ```bash
 # 1) carte 3D NetCDF à 3 fréquences + figures PNG + viewer HTML
-randi-gen run --bbox 41.8 5.5 43.4 9.6 --res 0.05 --freq 100 1000 10000 --az-step 10 \
+randi-gen run --bbox 41.8 5.5 43.4 9.6 --res 0.05 --freq 100 1000 10000 --n-azimuth 36 \
     --ais synthetic --out output --figures --html
 # ou simplement :
 python examples/run_toulon_corsica.py
@@ -112,9 +112,11 @@ Attributs globaux : `frequency_hz`, `ais_source`, `n_ships`, `bbox_south_west_no
 ## Modèle (résumé, voir docs/MODEL.md)
 
 Pour chaque cellule réceptrice et chaque secteur d'azimut `az`, somme incohérente des navires
-AIS pondérés par une **ouverture gaussienne** centrée sur leur cap (FWHM `azimuth_aperture_deg`
-= `--az-step` par défaut ; poids normalisés par navire, donc omnidirectionnel inchangé et cartes
-lissées au lieu d'un tout-ou-rien par secteur), atténués par la perte de transmission :
+AIS pondérés par une **ouverture en azimut** — gaussienne de FWHM `azimuth_aperture_deg`
+(= 360/`--n-azimuth` par défaut, ex. 10°) ou **directivité tabulée** dans un fichier .mat
+(`--az-pattern`, la forme de l'ouverture peut alors varier suivant l'angle ; poids normalisés
+par navire, donc omnidirectionnel inchangé et cartes lissées au lieu d'un tout-ou-rien par
+secteur) — atténués par la perte de transmission :
 
 ```
 NL(lat, lon, az, f) = 10·log10( Σ_navires w(az, cap)·10^((SL(f,type,v) − TL(r,f))/10) + P_fond(f) )

@@ -24,16 +24,16 @@ def test_make_grid():
         make_grid((43.4, 9.6, 41.8, 5.5), 0.1)
 
 
-def test_bad_azimuth_step():
+def test_bad_n_azimuth():
     ships = _ship(43.0, 7.0)
     with pytest.raises(ValueError):
-        compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(azimuth_step_deg=7.0))
+        compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(n_azimuth=0))
 
 
 def test_single_ship_points_east():
     # récepteur en (43.0, 6.0), navire à l'est en (43.0, 7.0) -> azimut ~90°
     ships = _ship(43.0, 7.0, kind="cargo", speed=15.0)
-    field = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(azimuth_step_deg=10.0))
+    field = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(n_azimuth=36))
     assert field.noise_level.shape == (1, 1, 36)
     az_bin = int(np.argmax(field.noise_level[0, 0]))
     assert field.azimuth[az_bin] == pytest.approx(85.0)  # cap ~89,7° -> pic sur le secteur centré sur 85°
@@ -58,10 +58,11 @@ def test_single_ship_points_east():
 
 
 def test_gaussian_aperture_profile():
-    # navire plein nord du récepteur (cap = 0°) : profil gaussien symétrique de FWHM = pas
+    # navire plein nord du récepteur (cap = 0°) : profil gaussien symétrique de FWHM = 360/n_azimuth
     ships = _ship(44.0, 6.0)
     step = 10.0
-    field = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(azimuth_step_deg=step))
+    field = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(n_azimuth=36))
+    assert field.meta["n_azimuth"] == 36
     bg_db = float(background_level_db(1000.0))
     nl = field.noise_level[0, 0]
     i5 = int(np.argmin(np.abs(field.azimuth - 5.0)))
@@ -81,9 +82,9 @@ def test_gaussian_aperture_profile():
 def test_aperture_override_and_validation():
     ships = _ship(44.0, 6.0)
     narrow = compute_directional_noise([43.0], [6.0], ships, 1000.0,
-                                       ModelParams(azimuth_step_deg=10.0, azimuth_aperture_deg=10.0))
+                                       ModelParams(n_azimuth=36, azimuth_aperture_deg=10.0))
     wide = compute_directional_noise([43.0], [6.0], ships, 1000.0,
-                                     ModelParams(azimuth_step_deg=10.0, azimuth_aperture_deg=40.0))
+                                     ModelParams(n_azimuth=36, azimuth_aperture_deg=40.0))
     i15 = int(np.argmin(np.abs(wide.azimuth - 15.0)))
     # ouverture plus large -> plus d'énergie dans les secteurs éloignés du cap, omni identique
     assert wide.noise_level[0, 0, i15] > narrow.noise_level[0, 0, i15] + 5.0
@@ -103,7 +104,7 @@ def test_omni_and_di():
 def test_two_ships_opposite_sectors():
     ships = ShipCatalog(lat=np.array([43.0, 43.0]), lon=np.array([7.0, 5.0]),
                         kind=np.array(["cargo", "cargo"]), speed_kn=np.array([15.0, 15.0]), source="test")
-    field = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(azimuth_step_deg=10.0))
+    field = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(n_azimuth=36))
     nl = field.noise_level[0, 0]
     east = int(np.argmax(np.where((field.azimuth > 60) & (field.azimuth < 120), nl, -np.inf)))
     west = int(np.argmax(np.where((field.azimuth > 240) & (field.azimuth < 300), nl, -np.inf)))

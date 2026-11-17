@@ -18,7 +18,7 @@ def density_file(tmp_path_factory):
 
 
 def test_run_with_local_density_raster(tmp_path, density_file):
-    rc = main(["run", "--bbox", *BBOX, "--res", "0.2", "--freq", "1000", "--az-step", "10",
+    rc = main(["run", "--bbox", *BBOX, "--res", "0.2", "--freq", "1000", "--n-azimuth", "36",
                "--ais-density", str(density_file), "--max-ships", "3000",
                "--out", str(tmp_path)])
     assert rc == 0

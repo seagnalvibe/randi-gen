@@ -22,7 +22,7 @@ if __name__ == "__main__":
                 "--bbox", "41.8", "5.5", "43.4", "9.6",
                 "--res", "0.05",
                 "--freq", "100", "1000", "10000",
-                "--az-step", "10",
+                "--n-azimuth", "36",
                 "--ais-density", "emodnet",
                 "--emodnet-layer", "vesseldensity_allavg",
                 "--max-ships", "20000",

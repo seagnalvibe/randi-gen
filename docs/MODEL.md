@@ -7,10 +7,13 @@ ambiant est prédite à partir de la **distribution spatiale des sources de traf
 ## Grandeurs et unités
 
 - Niveaux spectraux en **dB re 1 µPa²/Hz** (1 Hz de bande), source à **1 m** pour les SL.
-- Azimut : **0 = Nord, sens horaire**, mesuré **depuis le récepteur vers la source**, secteurs de
-  `azimuth_step_deg` (10° par défaut, doit diviser 360). Chaque navire n'est pas affecté à un seul
-  secteur (tout-ou-rien) mais pondéré sur tous les secteurs par une **ouverture gaussienne** centrée
-  sur son cap, de largeur à mi-hauteur (FWHM) `azimuth_aperture_deg` = `azimuth_step_deg` par défaut.
+- Azimut : **0 = Nord, sens horaire**, mesuré **depuis le récepteur vers la source**. La grille
+  d'azimut est définie par son **nombre de secteurs** `n_azimuth` (36 par défaut, option
+  `--n-azimuth`, grille uniforme de 360/`n_azimuth`°), ou extraite d'un **fichier .mat de
+  directivité** (`--az-pattern`, voir ci-dessous). Chaque navire n'est pas affecté à un seul
+  secteur (tout-ou-rien) mais pondéré sur tous les secteurs par une **ouverture** centrée sur son
+  cap — gaussienne de largeur à mi-hauteur (FWHM) `azimuth_aperture_deg` (= 360/`n_azimuth` par
+  défaut, option `--az-aperture`), ou forme quelconque tabulée dans le .mat.
 - Fréquence `f` en Hz, distance `r` en m, absorption en dB/km.
 
 ## Niveau de source d'un navire
@@ -40,15 +43,38 @@ diffus omnidirectionnel `P_fond` :
 
 ```
 NL(lat, lon, az, f) = 10·log10( Σ_{navires, r ≤ max_range} w(az, cap) · 10^((SL − TL(r,f))/10) + 10^(P_fond(f)/10) )
-w(az, cap) = exp( −4·ln2 · (Δaz / ouverture)² ),   Δaz = écart angulaire signé (az − cap) ramené à [−180, 180[
-ouverture (FWHM) = azimuth_aperture_deg  (= azimuth_step_deg par défaut, ex. 10° ; option --az-aperture)
 P_fond(f) = 60 − 12·log10(f / 100 Hz)     [dB re 1 µPa²/Hz]
 ```
+
+Poids `w(az, cap)` au cap `cap` vu du récepteur, deux modes :
+
+- **ouverture gaussienne** (défaut) : `w(az, cap) = exp(−4·ln2·(Δaz/ouverture)²)` avec
+  `Δaz` = écart angulaire signé (az − cap) ramené à [−180, 180[ et ouverture (FWHM)
+  `azimuth_aperture_deg` = 360/`n_azimuth` par défaut (ex. 10° pour 36 azimuts ; `--az-aperture`) ;
+- **directivité tabulée** (`--az-pattern fichier.mat`) : `w(az_k, cap)` = ligne `k` du motif
+  **interpolée linéairement** (périodiquement sur 360°) au cap `cap` — voir section suivante.
 
 Les poids `w` sont **normalisés par navire** (Σ_az w = 1) : l'énergie totale reçue d'un navire est
 conservée, donc le **niveau omnidirectionnel est inchangé** par rapport à un découpage tout-ou-rien ;
 seules les cartes directives `NL(az)` sont **lissées** (un navire proche d'une frontière de secteur
 alimente aussi le secteur voisin, au lieu de créer une marche d'escalier entre secteurs).
+
+## Directivité tabulée par fichier .mat (`--az-pattern`)
+
+Plutôt qu'un nombre d'azimuts + une ouverture gaussienne, on peut fournir un fichier matriciel
+`.mat` tabulant **pour chaque azimut une directivité en fonction de l'angle (cap) sous lequel le
+point récepteur voit la source** — ce qui permet de faire varier la forme de l'ouverture suivant
+l'angle. Variables attendues (noms acceptés quelle que soit la casse) :
+
+| variable | forme | signification |
+|---|---|---|
+| `directivity` | (n_az, n_ang) | poids **linéaires** (≥ 0 ; pour des dB, stocker `10^(dB/10)`) ; vecteur 1D (n_ang,) diffusé sur tous les azimuts |
+| `azimuth` | (n_az,) | azimuts de la carte (°) — **le nombre d'azimuts est extrait du fichier** ; si absent : grille uniforme de n_az secteurs (n_az = lignes de la matrice, ou `--n-azimuth` si vecteur 1D) |
+| `angle` | (n_ang,) | **échantillonnage angulaire** (°) du cap vu du récepteur — extrait du fichier ; si absent : uniforme sur [0, 360[ (n_ang = colonnes de la matrice) |
+
+Pour un navire de cap `cap`, le poids du secteur `az_k` est `directivity[k, :]` interpolé
+linéairement (périodique sur 360°) en `cap`. Lecture via `scipy.io.loadmat` (.mat v5/v7), avec
+repli sur `h5py` pour les .mat v7.3 (HDF5).
 
 ## Grandeurs dérivées
 
@@ -101,9 +127,10 @@ jamais `n_az` fois — sinon le plancher omnidirectionnel est artificiellement r
    **chaque type a son propre `SL_100Hz`** (tanker 185, cargo 182, passager 178, pêche 168,
    autre 165 dB) : la sommation AIS tient donc compte du type de chaque navire.
 4. **Sources → champ directif** : pour chaque cellule réceptrice (lat, lon) et chaque secteur
-   d'azimut `az` (pas de 10°), somme incohérente des navires pondérés par l'ouverture gaussienne
-   `w(az, cap)` (FWHM = `azimuth_aperture_deg` = pas par défaut, poids normalisés par navire) et
-   atténués par la perte de transmission :
+   d'azimut `az` (grille uniforme de 360/`n_azimuth`°, ou grille du fichier `--az-pattern`),
+   somme incohérente des navires pondérés par l'ouverture `w(az, cap)` (gaussienne de FWHM
+   `azimuth_aperture_deg`, ou motif tabulé interpolé ; poids normalisés par navire) et atténués
+   par la perte de transmission :
    `NL(lat, lon, az, f) = 10·log10( Σ w(az,cap) 10^((SL − TL(r,f))/10) + 10^(P_fond/10) )`,
    `r` = distance haversine navire→récepteur, `TL(r,f) = 15·log10(r_m) + α_Thorp(f)·r_km`.
 5. **Sortie** : NetCDF 3D `noise_level(lat, lon, azimuth)` + `omnidirectional_level` +
