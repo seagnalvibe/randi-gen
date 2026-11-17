@@ -96,9 +96,9 @@ def compute_directional_noise(lats, lons, ships, frequency_hz, params=None):
         idx = (np.arange(m)[:, None] * naz + azbin).ravel()
         acc[c0 * naz:(c0 + m) * naz] += np.bincount(idx, weights=energy.ravel(), minlength=m * naz)
 
-    lin = (acc.reshape(ncells, naz) + bg_lin).reshape(lats.size, lons.size, naz)
-    noise_level = 10.0 * np.log10(lin)
-    omnidirectional = 10.0 * np.log10(lin.sum(axis=2))
+    ship_lin = acc.reshape(lats.size, lons.size, naz)
+    noise_level = 10.0 * np.log10(ship_lin + bg_lin)
+    omnidirectional = 10.0 * np.log10(ship_lin.sum(axis=2) + bg_lin)
     directionality_index = noise_level.max(axis=2) - noise_level.min(axis=2)
     meta = {
         "azimuth_step_deg": step,
