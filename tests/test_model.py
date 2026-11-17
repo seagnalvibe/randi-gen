@@ -84,6 +84,18 @@ def test_frequency_effect():
     assert high.omnidirectional[0, 0] < low.omnidirectional[0, 0]
 
 
+def test_source_level_depends_on_kind_in_summation():
+    # même navire (position, vitesse), seul le type change : NL doit suivre SL(f, type, v)
+    from randi_gen.acoustics import SL_100HZ_DB
+
+    cargo = compute_directional_noise([43.0], [6.0], _ship(43.0, 7.0, kind="cargo", speed=15.0), 1000.0)
+    fishing = compute_directional_noise([43.0], [6.0], _ship(43.0, 7.0, kind="fishing", speed=15.0), 1000.0)
+    tanker = compute_directional_noise([43.0], [6.0], _ship(43.0, 7.0, kind="tanker", speed=15.0), 1000.0)
+    d_cargo_fishing = cargo.omnidirectional[0, 0] - fishing.omnidirectional[0, 0]
+    assert d_cargo_fishing == pytest.approx(SL_100HZ_DB["cargo"] - SL_100HZ_DB["fishing"], abs=0.5)
+    assert tanker.omnidirectional[0, 0] > cargo.omnidirectional[0, 0]  # tanker plus bruyant que cargo
+
+
 def test_max_range_cutoff():
     ships = _ship(41.0, 6.0)  # ~220 km au sud du récepteur
     f_in = compute_directional_noise([43.0], [6.0], ships, 1000.0, ModelParams(max_range_km=300.0))

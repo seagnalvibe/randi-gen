@@ -66,8 +66,19 @@ randi-gen run --bbox 41.8 5.5 43.4 9.6 --ais-density emodnet --emodnet-layer ves
 # ou raster téléchargé depuis le portail EMODnet (GeoTIFF zippé) ou local :
 randi-gen run --ais-density VesselDensity_All_2023.tif ...
 randi-gen run --ais-density https://.../vessel_density.zip ...
-# ou par type de navire (couches EMODnet dédiées) :
-randi-gen run --ais-density-type cargo=emodnet --ais-density-type passenger=emodnet ...
+# ou par type de navire : chaque type a SA propre couche EMODnet dédiée
+# (vesseldensity_XXavg, codes 00-12 : other=00, fishing=01, service=02, dredging=03,
+#  sailing=04, pleasure=05, highspeed=06, tug=07, passenger=08, cargo=09, tanker=10,
+#  military=11, unknown=12) et contribue à la sommation de bruit avec son propre
+# niveau de source SL(f, type, v) (tanker 185, cargo 182, passager 178, pêche 168,
+# autre 165 dB re 1 µPa @ 1 m à 100 Hz) :
+randi-gen run --ais-density-type cargo=emodnet --ais-density-type tanker=emodnet \
+    --ais-density-type passenger=emodnet --ais-density-type fishing=emodnet \
+    --ais-density-type other=emodnet ...
+# SPEC peut aussi être un fichier/URL local par type. En mode par type, le raster
+# combiné (somme des couches par type) est sauvegardé comme density_used.tif/.asc
+# et affiché (density_used.png), comme en mode --ais-density.
+# Cas test : python examples/run_toulon_corsica_emodnet_types.py
 ```
 
 Formats acceptés : `.tif/.tiff` (rasterio), `.asc/.grd` (ESRI ASCII, sans dépendance),
