@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .acoustics import normalize_kind
 from .ais import LANES, PORT_HOTSPOTS, ShipCatalog
 from .config import DEFAULT_BBOX
 
@@ -34,8 +35,7 @@ EMODNET_TYPE_CODE = {
     "pleasure": "05", "highspeed": "06", "tug": "07", "passenger": "08", "cargo": "09",
     "tanker": "10", "military": "11", "unknown": "12",
 }
-EMODNET_TYPE_LAYER = {t: f"vesseldensity_{EMODNET_TYPE_CODE[t]}avg" for t in
-                      ("cargo", "tanker", "passenger", "fishing", "other")}
+EMODNET_TYPE_LAYER = {t: f"vesseldensity_{code}avg" for t, code in EMODNET_TYPE_CODE.items()}
 
 DEFAULT_TYPE_MIX = {"cargo": 0.35, "tanker": 0.15, "passenger": 0.20, "fishing": 0.20, "other": 0.10}
 TYPE_SPEED_KN = {"cargo": 14.0, "tanker": 13.0, "passenger": 18.0, "fishing": 9.0, "other": 10.0}
@@ -256,6 +256,52 @@ def _extract_exception(xml_bytes):
     return m.group(1).decode("utf-8", "ignore") if m else xml_bytes[:200].decode("utf-8", "ignore")
 
 
+def _resolve_coverage_id(coverage_ids, layer):
+    """Résout un nom de couche vers le CoverageId exact côté serveur.
+
+    Accepte le nom court ('vesseldensity_09avg') ou complet ('emodnet__vesseldensity_09avg').
+    Ne replie JAMAIS sur une autre couche : chaque type de navire doit avoir sa propre
+    couche (sinon --ais-density-type chargerait silencieusement la couche all-types).
+    """
+    if layer in coverage_ids:
+        return layer
+    prefixed = [c for c in coverage_ids if c.endswith("__" + layer)]
+    if len(prefixed) == 1:
+        return prefixed[0]
+    containing = [c for c in coverage_ids if layer in c]
+    if len(containing) == 1:
+        return containing[0]
+    avail = [c for c in coverage_ids if "vesseldensity" in c.lower()][:8]
+    raise RuntimeError(
+        f"couche {layer!r} introuvable côté serveur ({len(coverage_ids)} couvertures ; "
+        f"vesseldensity disponibles ex. {avail})"
+    )
+
+
+def combine_rasters(rasters):
+    """Somme plusieurs rasters de densité (couches par type) -> raster combiné.
+
+    Retourne None si les grilles ne coïncident pas. Les cellules NaN partout
+    (terre / nodata) restent NaN.
+    """
+    if not rasters:
+        return None
+    r0 = rasters[0]
+    for r in rasters[1:]:
+        if r.shape != r0.shape or not (np.allclose(r.lats, r0.lats) and np.allclose(r.lons, r0.lons)):
+            return None
+    total = np.zeros(r0.shape)
+    all_nan = np.ones(r0.shape, dtype=bool)
+    for r in rasters:
+        fin = np.isfinite(r.values)
+        total += np.where(fin, r.values, 0.0)
+        all_nan &= ~fin
+    values = np.where(all_nan, np.nan, total)
+    return DensityRaster(values=values, lats=r0.lats, lons=r0.lons, area_km2=r0.area_km2,
+                         dlat_deg=r0.dlat_deg, dlon_deg=r0.dlon_deg, crs=r0.crs,
+                         source="sum-per-type:" + "+".join(r.source for r in rasters))
+
+
 def _native_epsg_from_describe(describe_xml):
     m = re.search(r'srsName="[^"]*/EPSG/\d+/(\d+)"', describe_xml)
     return f"EPSG:{m.group(1)}" if m else "EPSG:3857"
@@ -273,12 +319,7 @@ def fetch_emodnet_vessel_density(bbox, layer=EMODNET_DEFAULT_LAYER, wcs_url=EMOD
     south, west, north, east = (float(v) for v in bbox)
     cap = _http_get(f"{wcs_url}?service=WCS&version=2.0.1&request=GetCapabilities", timeout=timeout).decode("utf-8", "ignore")
     coverage_ids = re.findall(r"<wcs:CoverageId>([^<]+)</wcs:CoverageId>", cap)
-    if layer not in coverage_ids:
-        alt = [c for c in coverage_ids if "vesseldensity" in c.lower() and c.endswith("avg")]
-        if not alt:
-            raise RuntimeError(f"couche {layer!r} introuvable côté serveur ({len(coverage_ids)} couvertures)")
-        layer = "allavg" if any("allavg" in c for c in alt) else sorted(alt)[-1]
-        layer = next(c for c in alt if "allavg" in c) if any("allavg" in c for c in alt) else sorted(alt)[-1]
+    layer = _resolve_coverage_id(coverage_ids, layer)
     desc = _http_get(f"{wcs_url}?service=WCS&version=2.0.1&request=DescribeCoverage&coverageId={layer}", timeout=timeout).decode("utf-8", "ignore")
     native_crs = _native_epsg_from_describe(desc)
     times = re.findall(r"<gml:timePosition[^>]*>([^<]+)</gml:timePosition>", desc)
@@ -439,7 +480,7 @@ def sample_catalog_from_density(raster: DensityRaster, bbox=None, seed=42, hours
     lat = np.repeat(r.lats[ii], counts) + (rng.random(counts.sum()) - 0.5) * r.dlat_deg
     lon = np.repeat(r.lons[jj], counts) + (rng.random(counts.sum()) - 0.5) * r.dlon_deg
     if fixed_type is not None:
-        kind = np.full(counts.sum(), fixed_type, dtype="<U16")
+        kind = np.full(counts.sum(), normalize_kind(fixed_type), dtype="<U16")
     else:
         mix = type_mix or DEFAULT_TYPE_MIX
         keys = list(mix.keys())
