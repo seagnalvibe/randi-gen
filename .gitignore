@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.streamlit/
+output/
+examples/output/
+*.nc
+*.png
+*.html
