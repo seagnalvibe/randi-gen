@@ -111,6 +111,50 @@ def test_fetch_emodnet_online():
     assert np.nanmax(r.values) >= 0
 
 
+def test_resolve_coverage_id_exact_per_type():
+    ids = ["emodnet__vesseldensity_allavg", "emodnet__vesseldensity_09avg",
+           "emodnet__vesseldensity_10avg", "emodnet__vesseldensity_01avg", "emodnet__autre_couche"]
+    # nom complet -> exact
+    assert dens._resolve_coverage_id(ids, "emodnet__vesseldensity_09avg") == "emodnet__vesseldensity_09avg"
+    # nom court -> suffixe, JAMAIS le repli allavg (bug : cargo chargeait all-types)
+    assert dens._resolve_coverage_id(ids, "vesseldensity_09avg") == "emodnet__vesseldensity_09avg"
+    assert dens._resolve_coverage_id(ids, "vesseldensity_10avg") == "emodnet__vesseldensity_10avg"
+    assert dens._resolve_coverage_id(ids, "vesseldensity_allavg") == "emodnet__vesseldensity_allavg"
+    with pytest.raises(RuntimeError):
+        dens._resolve_coverage_id(ids, "vesseldensity_99avg")
+
+
+def test_combine_rasters():
+    import copy
+
+    r1 = _tiny_raster()
+    r2 = copy.copy(r1)
+    r2.values = np.where(np.isfinite(r1.values), r1.values * 2.0, np.nan)
+    comb = dens.combine_rasters([r1, r2])
+    assert comb is not None
+    assert np.allclose(comb.values, np.where(np.isfinite(r1.values), r1.values * 3.0, np.nan), equal_nan=True)
+    # NaN partout -> NaN conservé
+    r3 = copy.copy(r1)
+    r3.values = np.full(r1.shape, np.nan)
+    comb2 = dens.combine_rasters([r1, r3])
+    assert np.allclose(comb2.values, r1.values, equal_nan=True)
+    # grilles différentes -> None
+    r4 = copy.copy(r1)
+    r4.lats = r1.lats + 0.001
+    assert dens.combine_rasters([r1, r4]) is None
+    assert dens.combine_rasters([]) is None
+
+
+def test_emodnet_type_layer_all_codes():
+    # les 13 codes EMODnet 00-12 ont leur couche dédiée
+    assert len(dens.EMODNET_TYPE_LAYER) == len(dens.EMODNET_TYPE_CODE) == 13
+    assert dens.EMODNET_TYPE_LAYER["cargo"] == "vesseldensity_09avg"
+    assert dens.EMODNET_TYPE_LAYER["tanker"] == "vesseldensity_10avg"
+    assert dens.EMODNET_TYPE_LAYER["passenger"] == "vesseldensity_08avg"
+    assert dens.EMODNET_TYPE_LAYER["fishing"] == "vesseldensity_01avg"
+    assert dens.EMODNET_TYPE_LAYER["other"] == "vesseldensity_00avg"
+
+
 def test_plot_density_raster(tmp_path):
     from randi_gen.visualize import plot_density_raster
 
