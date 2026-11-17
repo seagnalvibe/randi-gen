@@ -8,7 +8,9 @@ ambiant est prédite à partir de la **distribution spatiale des sources de traf
 
 - Niveaux spectraux en **dB re 1 µPa²/Hz** (1 Hz de bande), source à **1 m** pour les SL.
 - Azimut : **0 = Nord, sens horaire**, mesuré **depuis le récepteur vers la source**, secteurs de
-  `azimuth_step_deg` (10° par défaut, doit diviser 360).
+  `azimuth_step_deg` (10° par défaut, doit diviser 360). Chaque navire n'est pas affecté à un seul
+  secteur (tout-ou-rien) mais pondéré sur tous les secteurs par une **ouverture gaussienne** centrée
+  sur son cap, de largeur à mi-hauteur (FWHM) `azimuth_aperture_deg` = `azimuth_step_deg` par défaut.
 - Fréquence `f` en Hz, distance `r` en m, absorption en dB/km.
 
 ## Niveau de source d'un navire
@@ -32,13 +34,21 @@ TL(r, f) = 10·n·log10(r) + α(f)·r/1000     avec r plafonnée à min_range_m 
 
 ## Niveau directif par cellule et par secteur d'azimut
 
-Somme **incohérente** (énergétique) des navires AIS dont le cap vu du récepteur tombe dans le
-secteur, atténués par la TL, plus un fond diffus omnidirectionnel `P_fond` :
+Somme **incohérente** (énergétique) des navires AIS, chacun pondéré dans chaque secteur par une
+**ouverture gaussienne** centrée sur son cap vu du récepteur, atténués par la TL, plus un fond
+diffus omnidirectionnel `P_fond` :
 
 ```
-NL(lat, lon, az, f) = 10·log10( Σ_{navires ∈ secteur az, r ≤ max_range} 10^((SL − TL(r,f))/10) + 10^(P_fond(f)/10) )
+NL(lat, lon, az, f) = 10·log10( Σ_{navires, r ≤ max_range} w(az, cap) · 10^((SL − TL(r,f))/10) + 10^(P_fond(f)/10) )
+w(az, cap) = exp( −4·ln2 · (Δaz / ouverture)² ),   Δaz = écart angulaire signé (az − cap) ramené à [−180, 180[
+ouverture (FWHM) = azimuth_aperture_deg  (= azimuth_step_deg par défaut, ex. 10° ; option --az-aperture)
 P_fond(f) = 60 − 12·log10(f / 100 Hz)     [dB re 1 µPa²/Hz]
 ```
+
+Les poids `w` sont **normalisés par navire** (Σ_az w = 1) : l'énergie totale reçue d'un navire est
+conservée, donc le **niveau omnidirectionnel est inchangé** par rapport à un découpage tout-ou-rien ;
+seules les cartes directives `NL(az)` sont **lissées** (un navire proche d'une frontière de secteur
+alimente aussi le secteur voisin, au lieu de créer une marche d'escalier entre secteurs).
 
 ## Grandeurs dérivées
 
@@ -91,9 +101,10 @@ jamais `n_az` fois — sinon le plancher omnidirectionnel est artificiellement r
    **chaque type a son propre `SL_100Hz`** (tanker 185, cargo 182, passager 178, pêche 168,
    autre 165 dB) : la sommation AIS tient donc compte du type de chaque navire.
 4. **Sources → champ directif** : pour chaque cellule réceptrice (lat, lon) et chaque secteur
-   d'azimut `az` (pas de 10°), somme incohérente des navires du secteur (cap vu depuis le
-   récepteur), atténués par la perte de transmission :
-   `NL(lat, lon, az, f) = 10·log10( Σ 10^((SL − TL(r,f))/10) + 10^(P_fond/10) )`,
+   d'azimut `az` (pas de 10°), somme incohérente des navires pondérés par l'ouverture gaussienne
+   `w(az, cap)` (FWHM = `azimuth_aperture_deg` = pas par défaut, poids normalisés par navire) et
+   atténués par la perte de transmission :
+   `NL(lat, lon, az, f) = 10·log10( Σ w(az,cap) 10^((SL − TL(r,f))/10) + 10^(P_fond/10) )`,
    `r` = distance haversine navire→récepteur, `TL(r,f) = 15·log10(r_m) + α_Thorp(f)·r_km`.
 5. **Sortie** : NetCDF 3D `noise_level(lat, lon, azimuth)` + `omnidirectional_level` +
    `directionality_index` (2D).

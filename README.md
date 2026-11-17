@@ -106,16 +106,19 @@ des `.nc`). La chaîne de conversion densité → navires → niveau directif es
 | `directionality_index` | `lat, lon` | DI = 10·log10(max/min sur azimut) (dB) |
 
 Attributs globaux : `frequency_hz`, `ais_source`, `n_ships`, `bbox_south_west_north_east`,
-`grid_resolution_deg`, `azimuth_step_deg`, `max_range_km`, `spreading_exponent`, `min_range_m`,
-`history`, `references`.
+`grid_resolution_deg`, `azimuth_step_deg`, `azimuth_aperture_deg`, `max_range_km`, `spreading_exponent`,
+`min_range_m`, `history`, `references`.
 
 ## Modèle (résumé, voir docs/MODEL.md)
 
 Pour chaque cellule réceptrice et chaque secteur d'azimut `az`, somme incohérente des navires
-AIS situés dans ce secteur, atténués par la perte de transmission :
+AIS pondérés par une **ouverture gaussienne** centrée sur leur cap (FWHM `azimuth_aperture_deg`
+= `--az-step` par défaut ; poids normalisés par navire, donc omnidirectionnel inchangé et cartes
+lissées au lieu d'un tout-ou-rien par secteur), atténués par la perte de transmission :
 
 ```
-NL(lat, lon, az, f) = 10·log10( Σ_navires(az) 10^((SL(f,type,v) − TL(r,f))/10) + P_fond(f) )
+NL(lat, lon, az, f) = 10·log10( Σ_navires w(az, cap)·10^((SL(f,type,v) − TL(r,f))/10) + P_fond(f) )
+w(az, cap) = exp(−4·ln2·((az − cap)/ouverture)²)      (ouverture = FWHM en degrés)
 TL(r, f) = 10·n·log10(r) + α_Thorp(f)·r/1000        (r en m, plafonnée à min_range_m)
 SL(f)    = SL_100Hz(type) − 17·log10(f/100) + clip(5·log10(v/12), ±6)
 ```
