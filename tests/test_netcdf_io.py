@@ -11,7 +11,7 @@ def _field():
     ships = ShipCatalog(lat=np.array([43.0, 42.0]), lon=np.array([7.0, 8.5]),
                         kind=np.array(["cargo", "passenger"]), speed_kn=np.array([15.0, 18.0]),
                         source="test")
-    f = compute_directional_noise([43.0, 42.5], [6.0, 7.0], ships, 1000.0, ModelParams(azimuth_step_deg=10.0))
+    f = compute_directional_noise([43.0, 42.5], [6.0, 7.0], ships, 1000.0, ModelParams(n_azimuth=36))
     f.meta.update(ais_source=ships.source, bbox=[41.8, 5.5, 43.4, 9.6], resolution_deg=0.5)
     return f
 
