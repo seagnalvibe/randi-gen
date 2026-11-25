@@ -32,7 +32,7 @@ def build_parser():
     r.add_argument("--emodnet-layer", default="vesseldensity_allavg",
                    help="couche EMODnet vessel density (défaut: vesseldensity_allavg ; par type: vesseldensity_09avg cargo, _10 tanker, _08 passenger, _01 fishing)")
     r.add_argument("--ais-density-type", action="append", default=[], metavar="TYPE=SPEC",
-                   help="raster de densité par type de navire, répétable (TYPE in cargo,tanker,passenger,fishing,other ; SPEC='emodnet' ou chemin/URL)")
+                   help="raster de densité par type de navire, répétable (TYPE = nom de type EMODnet : cargo,tanker,passenger,fishing,other,service,dredging,sailing,pleasure,highspeed,tug,military,unknown ; SPEC='emodnet' -> couche vesseldensity_XXavg dédiée, ou chemin/URL). Chaque type contribue à la sommation avec son propre niveau de source SL(f,type,v)")
     r.add_argument("--density-hours-per-month", type=float, default=720.0,
                    help="heures par mois pour convertir la densité EMODnet (h/km²/mois) en navires (défaut 720)")
     r.add_argument("--density-scale", type=float, default=1.0, help="facteur d'échelle sur la densité échantillonnée")
@@ -85,7 +85,9 @@ def _ships_from_density(args, bbox, outdir):
                           write_ascii_grid)
 
     if args.ais_density_type:
-        cats = []
+        from .density import combine_rasters
+
+        cats, rasters = [], []
         for item in args.ais_density_type:
             t, _, sp = item.partition("=")
             t = t.strip().lower()
@@ -94,16 +96,33 @@ def _ships_from_density(args, bbox, outdir):
             if sp.strip().lower() == "emodnet":
                 raster, note = load_density_raster("emodnet", bbox=bbox, outdir=outdir, seed=args.seed,
                                                    layer=EMODNET_TYPE_LAYER[t])
+                print(f"[randi-gen] densité type={t} [{note}] : couche EMODnet {EMODNET_TYPE_LAYER[t]}, "
+                      f"raster {raster.shape}, max={np.nanmax(raster.values):.1f} h/km²/mois")
             else:
                 raster, note = load_density_raster(sp, bbox=bbox, outdir=outdir, seed=args.seed)
-            print(f"[randi-gen] densité type={t} [{note}] : raster {raster.shape}, max={np.nanmax(raster.values):.1f} h/km²/mois")
+                print(f"[randi-gen] densité type={t} [{note}] : {sp}, raster {raster.shape}, "
+                      f"max={np.nanmax(raster.values):.1f} h/km²/mois")
+            rasters.append(raster)
             cats.append(sample_catalog_from_density(raster, bbox=bbox, seed=args.seed,
                                                     hours_per_month=args.density_hours_per_month,
                                                     scale=args.density_scale, max_ships=args.max_ships,
                                                     fixed_type=t))
         ships = ShipCatalog.concat(cats)
-        ships.source = "emodnet-vessel-density-per-type; " + ships.source
-        return ships, None
+        ships.source = "vessel-density-per-type; " + ships.source
+        combined = combine_rasters(rasters)
+        if combined is not None:
+            try:
+                from .density import write_geotiff
+
+                rp = write_geotiff(combined, Path(outdir) / "density_used.tif")
+            except ImportError:
+                rp = write_ascii_grid(combined, Path(outdir) / "density_used.asc")
+            from .visualize import plot_density_raster
+
+            plot_density_raster(combined, Path(outdir) / "density_used.png")
+            print(f"[randi-gen] raster combiné (somme des types) {combined.shape}, "
+                  f"max={np.nanmax(combined.values):.1f} h/km²/mois -> {rp} et density_used.png")
+        return ships, combined
     raster, note = load_density_raster(args.ais_density, bbox=bbox, outdir=outdir, seed=args.seed,
                                        layer=args.emodnet_layer)
     try:

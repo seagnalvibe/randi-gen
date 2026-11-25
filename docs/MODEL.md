@@ -43,9 +43,15 @@ P_fond(f) = 60 − 12·log10(f / 100 Hz)     [dB re 1 µPa²/Hz]
 ## Grandeurs dérivées
 
 ```
-omnidirectionnel(lat, lon)  = 10·log10( Σ_az 10^(NL(az)/10) )
+omnidirectionnel(lat, lon)  = 10·log10( Σ_navires 10^((SL − TL)/10) + 10^(P_fond/10) )
+                            = 10·log10( Σ_az 10^(NL(az)/10) − (n_az − 1)·10^(P_fond/10) )
 indice de directivité DI    = 10·log10( max_az NL / min_az NL )     [dB]
 ```
+
+`P_fond` est un fond **omnidirectionnel** : il est compté **une seule fois** dans le niveau
+omnidirectionnel (et une fois par secteur dans `NL(az)`, qui inclut le fond ambiant du secteur),
+jamais `n_az` fois — sinon le plancher omnidirectionnel est artificiellement relevé de
+`10·log10(n_az)` (~15,6 dB à pas de 10°) et masque le signal faible des rails lointains.
 
 ## Sources AIS
 
@@ -74,11 +80,16 @@ indice de directivité DI    = 10·log10( max_az NL / min_az NL )     [dB]
    mois donne le **nombre moyen de navires présents** par km² : `λ_cellule = D(x) · A_km² / H`
    avec `H = 720 h/mois` (option `--density-hours-per-month`) et `A` = aire de la cellule.
    Tirage de **Poisson(λ)** par cellule → `N` navires, positions **uniformes dans la
-   cellule**, type de navire (couche EMODnet par type, sinon mix cargo 35 % / tanker 15 % /
-   passagers 20 % / pêche 20 % / autre 10 %), vitesse `~ N(μ_type, 1,5)` bornée [2, 25] nœuds.
+   cellule**, type de navire : couche EMODnet **dédiée par type** via `--ais-density-type
+   TYPE=emodnet` (couche `vesseldensity_XXavg`, codes EMODnet 00–12, type normalisé vers les
+   5 classes du modèle), sinon mix cargo 35 % / tanker 15 % / passagers 20 % / pêche 20 % /
+   autre 10 % ; vitesse `~ N(μ_type, 1,5)` bornée [2, 25] nœuds. En mode par type, le raster
+   combiné (somme des couches) est aussi sauvé comme `density_used.tif`.
    On obtient un **ShipCatalog (lat, lon, type, vitesse)** — strictement identique à celui
    du mode « points AIS », donc la suite du modèle est la même.
-3. **Navire → source ponctuelle** : `SL(f, type, v)` (formule ci-dessus), en dB re 1 µPa @ 1 m.
+3. **Navire → source ponctuelle** : `SL(f, type, v)` (formule ci-dessus), en dB re 1 µPa @ 1 m —
+   **chaque type a son propre `SL_100Hz`** (tanker 185, cargo 182, passager 178, pêche 168,
+   autre 165 dB) : la sommation AIS tient donc compte du type de chaque navire.
 4. **Sources → champ directif** : pour chaque cellule réceptrice (lat, lon) et chaque secteur
    d'azimut `az` (pas de 10°), somme incohérente des navires du secteur (cap vu depuis le
    récepteur), atténués par la perte de transmission :
