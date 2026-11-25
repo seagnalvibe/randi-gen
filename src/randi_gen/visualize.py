@@ -21,6 +21,19 @@ CITIES = {
 }
 
 
+def _robust_limits(z, lo=1.0, hi=99.5):
+    """Limites de couleur robustes (percentiles) : les points chauds isolés
+    (ports) n'écrasent pas le reste de la carte (rails de navigation)."""
+    zf = np.asarray(z, float)
+    zf = zf[np.isfinite(zf)]
+    if zf.size == 0:
+        return None, None
+    vmin, vmax = float(np.percentile(zf, lo)), float(np.percentile(zf, hi))
+    if vmax <= vmin:
+        vmax = vmin + 1e-9
+    return vmin, vmax
+
+
 def nearest_azimuth_index(field, azimuth_deg):
     d = np.abs(((field.azimuth - float(azimuth_deg) + 180.0) % 360.0) - 180.0)
     return int(np.argmin(d))
@@ -43,8 +56,9 @@ def plot_map_azimuth(field, azimuth_deg, ax=None, cmap="viridis"):
     ai = nearest_azimuth_index(field, azimuth_deg)
     fig, ax = (plt.subplots(figsize=(8, 6)) if ax is None else (ax.figure, ax))
     z = field.noise_level[:, :, ai]
-    pcm = ax.pcolormesh(field.lon, field.lat, z, shading="auto", cmap=cmap)
-    fig.colorbar(pcm, ax=ax, label="dB re 1 µPa²/Hz")
+    vmin, vmax = _robust_limits(z)
+    pcm = ax.pcolormesh(field.lon, field.lat, z, shading="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+    fig.colorbar(pcm, ax=ax, label="dB re 1 µPa²/Hz (clip p1–p99,5)")
     _city_overlay(ax)
     ax.set_xlabel("Longitude (°E)")
     ax.set_ylabel("Latitude (°N)")
@@ -55,8 +69,9 @@ def plot_map_azimuth(field, azimuth_deg, ax=None, cmap="viridis"):
 def plot_omni(field, ax=None, cmap="viridis"):
     """Carte du niveau omnidirectionnel."""
     fig, ax = (plt.subplots(figsize=(8, 6)) if ax is None else (ax.figure, ax))
-    pcm = ax.pcolormesh(field.lon, field.lat, field.omnidirectional, shading="auto", cmap=cmap)
-    fig.colorbar(pcm, ax=ax, label="dB re 1 µPa²/Hz")
+    vmin, vmax = _robust_limits(field.omnidirectional)
+    pcm = ax.pcolormesh(field.lon, field.lat, field.omnidirectional, shading="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+    fig.colorbar(pcm, ax=ax, label="dB re 1 µPa²/Hz (clip p1–p99,5)")
     _city_overlay(ax)
     ax.set_xlabel("Longitude (°E)")
     ax.set_ylabel("Latitude (°N)")
@@ -67,8 +82,9 @@ def plot_omni(field, ax=None, cmap="viridis"):
 def plot_di(field, ax=None, cmap="magma"):
     """Carte de l'indice de directivité (dB)."""
     fig, ax = (plt.subplots(figsize=(8, 6)) if ax is None else (ax.figure, ax))
-    pcm = ax.pcolormesh(field.lon, field.lat, field.directionality_index, shading="auto", cmap=cmap)
-    fig.colorbar(pcm, ax=ax, label="dB")
+    vmin, vmax = _robust_limits(field.directionality_index)
+    pcm = ax.pcolormesh(field.lon, field.lat, field.directionality_index, shading="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+    fig.colorbar(pcm, ax=ax, label="dB (clip p1–p99,5)")
     _city_overlay(ax)
     ax.set_xlabel("Longitude (°E)")
     ax.set_ylabel("Latitude (°N)")

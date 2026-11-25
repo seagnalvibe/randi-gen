@@ -20,7 +20,7 @@ def run_dir(tmp_path_factory):
         "--bbox", *BBOX,
         "--res", "0.2",
         "--freq", "1000",
-        "--az-step", "10",
+        "--n-azimuth", "36",
         "--ais", "synthetic",
         "--seed", "7",
         "--out", str(out),
